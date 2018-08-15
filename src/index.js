@@ -61,7 +61,7 @@ function repositoryUpdate(json) {
 //append the normal git command to the returned string.
 function getSSHProxyCommand(privateKeyFile) {
 	privateKeyFile = privateKeyFile.replace(/\\/g, "/");
-	return 'GIT_SSH_COMMAND="ssh -i ' + privateKeyFile + "-o 'StrictHostKeyChecking no'" + ' -F /dev/null" ';
+	return 'GIT_SSH_COMMAND="ssh -i ' + privateKeyFile + ' -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no ' + ' -F /dev/null" ';
 }
 
 function pull(repoDir, sshUrl) {
