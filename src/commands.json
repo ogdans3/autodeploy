@@ -1,0 +1,7 @@
+{
+	"npm start": "npm start",
+	"npm build": "npm build",
+
+	"docker compose build": "docker-compose build",
+	"docker compose up daemon": "docker-compose up -d"
+}
