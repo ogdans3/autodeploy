@@ -68,9 +68,9 @@ function pull(repoDir, sshUrl) {
 	console.log("Pull repo, repoDir: " + repoDir + ", sshUrl: " + sshUrl);
 	let ssh = getSSHProxyCommand(path.join(sshKeyGen.FOLDER, "/key_1"));
 	//TODO: Replace ; with &&
-	let command = "'" + "cd " + repoDir + "; " + ssh + "git pull " + sshUrl + "'";
+	let command = "cd " + repoDir + "; " + ssh + "git pull " + sshUrl;
 	if(isWin) {
-		command = "\"C:\\Program Files\\Git\\git-bash.exe\" -c " + command;
+		command = "\"C:\\Program Files\\Git\\git-bash.exe\" -c " + "'" + command + "'";
 	}
 	exec(command, (err, stdout, stderr) => {
 	  if (err) {
@@ -87,9 +87,9 @@ function pull(repoDir, sshUrl) {
 function clone(sshUrl, directory) {
 	console.log("Clone repo, directory: " + directory + ", sshUrl: " + sshUrl);
 	let ssh = getSSHProxyCommand(path.join(sshKeyGen.FOLDER, "/key_1"));
-	let command = "'" + ssh + "git clone " + sshUrl + " " + directory + "'";
+	let command = ssh + "git clone " + sshUrl + " " + directory;
 	if(isWin) {
-		command = "\"C:\\Program Files\\Git\\git-bash.exe\" -c " + command;
+		command = "\"C:\\Program Files\\Git\\git-bash.exe\" -c " + "'" + command + "'";
 	}
 	console.log("command: ", command);
 	exec(command, (err, stdout, stderr) => {
