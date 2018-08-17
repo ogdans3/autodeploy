@@ -1,0 +1,15 @@
+<html>
+	<head></head>
+	<body>
+		[[? model.repositories.length == 0]]
+			No repositories
+		[[?? true]]
+			<ul>
+				[[~ model.repositories :repository]]
+					<li> <a href = '[[=repository.editUrl]]'>[[= repository.displayName]]</a> </li>
+				[[~]]
+			</ul>
+		[[?]]
+	</body>
+
+</html>

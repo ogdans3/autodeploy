@@ -3,6 +3,7 @@ const { exec } = require('child_process');
 
 const sshKeyGen = require("./sshKeyGen.js");
 const util = require("./util.js");
+const Log = require("./logs.js").Log;
 
 const isWin = util.isWin;
 
@@ -26,14 +27,18 @@ function pull(repo) {
 		command = "\"C:\\Program Files\\Git\\git-bash.exe\" -c " + "'" + command + "'";
 	}
 	exec(command, (err, stdout, stderr) => {
-	  if (err) {
-	  	console.error("Node could not execute the command", err);
-	    return;
-	  }
+		if (err) {
+			console.error("Node could not execute the command", err);
+			new Log(repo, "Pull", "Node could not execute the command", err);
+			return;
+		}
 
-	  // the *entire* stdout and stderr (buffered)
-	  console.log(`stdout: ${stdout}`);
-	  console.log(`stderr: ${stderr}`);
+		// the *entire* stdout and stderr (buffered)
+		console.log(`stdout: ${stdout}`);
+		console.log(`stderr: ${stderr}`);
+		new Log(repo, "Pull", "Command executed without error", stdout, stderr);
+
+		repo.pullFinished();
 	});
 }
 
@@ -49,14 +54,18 @@ function clone(repo) {
 	}
 	console.log("command: ", command);
 	exec(command, (err, stdout, stderr) => {
-	  if (err) {
-	  	console.error("Node could not execute the command", err);
-	    return;
-	  }
+		if (err) {
+			console.error("Node could not execute the command", err);
+			new Log(repo, "Clone", "Node could not execute the command", err);
+			return;
+		}
 
 	  // the *entire* stdout and stderr (buffered)
 	  console.log("Stdout: ", stdout);
 	  console.log("Stdout: ", stderr);
+
+	  new Log(repo, "Clone", "Command executed without error", stdout, stderr);
+	  repo.cloneFinished();
 	});
 }
 

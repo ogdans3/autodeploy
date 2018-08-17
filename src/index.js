@@ -1,15 +1,22 @@
 const express = require("express");
 const app = express();
 const bodyParser = require("body-parser");
+const dot = require("express-dot-engine");
 
 const fs = require("fs");
 const path = require("path");
 
 const sshKeyGen = require("./sshKeyGen.js");
 const git = require("./git.js");
+const logs = require("./logs.js");
 sshKeyGen.generate();
 
 let port = 3000;
+
+// (optional) set globals any thing you want to be exposed by this in {{= }} and in def {{# }}
+app.set("views", path.join(__dirname, "frontend"));
+app.set("view engine", "dot");
+app.engine('.dot', dot.__express);
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({
@@ -26,6 +33,18 @@ app.get("/new", (req, res) => {
 	res.sendFile(path.join(__dirname, "frontend", "new.html"));
 })
 
+app.get("/list", (req, res) => {
+	let repos = Object.keys(repositories).map(r => repositories[r].toJSON())
+	res.render("list.dot", {repositories: repos});
+})
+
+app.get("/repo/edit/:id", (req, res) => {
+	let id = req.params.id;
+	let repo = repositories[id].toJSON();
+	console.log(repo);
+	res.render("edit.dot", {repository: repo});
+})
+
 app.post("/new", (req, res) => {
 	let json = req.body;
 	console.log(json)
@@ -33,21 +52,44 @@ app.post("/new", (req, res) => {
 	let name = json.name;
 	let url = json.url;
 	let directory = json.directory;
-	repo = new Repository(name, url, directory);
+	let deployCommands = json.deployCommands;
+	let teardownCommands = json.teardownCommands;
+	repo = new Repository(name, url, directory, deployCommands, teardownCommands);
 	repositories[repo.getIdentifier()] = repo;
 
 	res.send("Registered: " + name + ", " + url + ", " + directory);
 })
 
+app.post("/save/:id", (req, res) => {
+	let id = req.params.id;
+	let json = req.body;
+
+	let name = json.name;
+	let url = json.url;
+	let directory = json.directory;
+	let deployCommands = json.deployCommands;
+	let teardownCommands = json.teardownCommands;
+
+	let repo = repositories[id];
+	repo.update(name, url, directory, deployCommands, teardownCommands);
+	res.send("Saved");
+})
+
 app.post("/receive", function(req, res){
 	let json = req.body;
 	console.log(req.body);      // your JSON
-	latestMessage = json;
 	res.send();
 
 	let url = json.repository.url;
 	url = Repository.handleGitUrl(url);
-	let repo = repositories[url];
+	let repo;
+	for(var i = 0; i < Object.keys(repositories).length; i++) {
+		let key = Object.keys(repositories)[i];
+		let r = repositories[key];
+		if(r.userDefined.url === url) {
+			repo = r;
+		}
+	}
 
 	if(repo === null || repo === undefined) {
 		console.warn("Warning: Repository has not been created. We are ignoring the webhook intill a user creates the repository at the /new endpoint.")
@@ -82,8 +124,10 @@ function repositoryUpdate(repo) {
 	}
 }
 
-app.get("/last", function(req, res) {
-	res.send(latestMessage);
+app.get("/logs", function(req, res) {
+	let jsonLogs = logs.logs.map(log => log.toJSON());
+	console.log(jsonLogs);
+	res.render("log.dot", {logs: jsonLogs.reverse()});
 })
 
 app.get("/key/:name", function(req, res) {
