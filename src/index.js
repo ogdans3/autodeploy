@@ -158,6 +158,10 @@ app.get("/key", function(req, res) {
 	})
 })
 
+app.get("/", (req, res) => {
+	res.render("links.dot");
+})
+
 app.listen(port, () => {
 	console.log("AutoDeploy server listening on port: " + port);
 });
