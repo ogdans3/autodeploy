@@ -2,6 +2,8 @@ const path = require("path");
 const util = require("./util.js");
 const uuidv4 = require('uuid/v4');
 const { exec, spawn } = require('child_process');
+const kill = require('tree-kill');
+
 
 const Log = require("./logs.js").Log;
 
@@ -92,88 +94,79 @@ class Repository {
 	}
 
 	//TODO: Add event system
-	cloneFinished() {
-		this.teardown();
-		this.deploy();
+	async cloneFinished() {
+		await this.teardown();
+		await this.deploy();
 	}
 
 	//TODO: Add event system
-	pullFinished() {
-		this.teardown();
-		this.deploy();
+	async pullFinished() {
+		await this.teardown();
+		await this.deploy();
 	}
 
 	teardown() {
 		let self = this;
-		let command = "";
+		return new Promise((fulfill, reject) => {
+			let command = "";
 
-		let teardown = this.commands.teardown;
-		if(teardown === null || teardown === undefined || teardown === "") {
-			if(this.pid === null) {
-				new Log(self, "Teardown", "No service PID to terminate");
+			let teardown = self.commands.teardown;
+			if(teardown === null || teardown === undefined || teardown === "") {
+				if(self.pid === null) {
+					new Log(self, "Teardown", "No service PID to terminate");
+					fulfill();
+					return;
+				}
+				kill(self.pid, "SIGKILL", (err) => {
+					if(err) {
+						new Log(self, "Teardown", "Failed to terminate service", err);
+						reject();
+						return;
+					}
+					new Log(self, "Teardown", "Service terminated");
+					fulfill();
+				});
 				return;
 			}
-			process.kill(-this.pid);
-			return;
-			teardown = "kill -9 " + this.pid;
-		}
-		command += teardown;
+			command += teardown;
 
-		let execOpt = {cwd: this.directory};
-		if(util.isWin) {
-			execOpt.shell = "C:\\Program Files\\Git\\git-bash.exe";
-		}
-		exec(command, execOpt, (err, stdout, stderr) => {
-		  if (err) {
-		  	new Log(self, "Teardown", "Node could not execute the command", err);
-		    return;
-		  }
-		  new Log(self, "Teardown", "Command executed without error", stdout, stderr);
-		});
-	
+			let execOpt = {cwd: self.directory};
+			if(util.isWin) {
+				execOpt.shell = "C:\\Program Files\\Git\\git-bash.exe";
+			}
+			exec(command, execOpt, (err, stdout, stderr) => {
+				if (err) {
+					new Log(self, "Teardown", "Node could not execute the command", err);
+					reject();
+					return;
+				}
+				new Log(self, "Teardown", "Command executed without error", stdout, stderr);
+				fulfill();
+			});
+
+
+		})
 	}
 
-	deploy() {
+	async deploy() {
+		console.log("DEPLOY. Commands: " + this.commands.deploy);
 		let self = this;
-		let command = "";
-		command += this.commands.deploy;
+		let commands = "";
+		commands += this.commands.deploy;
 
-		let spawnOpt = {cwd: this.directory, detached: true};
+		let spawnOpt = {cwd: this.directory};
 		if(util.isWin) {
 			//spawnOpt.shell = "C:\\Program Files\\Git\\git-bash.exe";
-			command = command.replace("npm", "npm.cmd");
+			commands = commands.replace(/npm/g, "npm.cmd");
 		}
-		
-		console.log("Commands: ", command);
-		let args = command.split(" ");
-		let child = spawn(args[0], args.slice(1), spawnOpt)
-		let pid = child.pid;
-		this.pid = pid;
-		this.childProcess = child;
-		new Log(self, "Deploy", "Spawned process with PID: " + pid);
 
-		let stdout = [];
-		let stderr = [];
-
-		child.stderr.on('data', function (data) {
-			stderr.push(data.toString());
-			console.error("STDERR:", data.toString());
-		});
-		child.stdout.on('data', function (data) {
-			stdout.push(data.toString());
-			console.log("STDOUT:", data.toString());
-		});
-		child.on('exit', function (exitCode) {
-			new Log(self, "Process exited", "Exit code: " + exitCode, stdout, stderr);
-			console.log("Child exited with code: " + exitCode);
-		});
-		/* (err, stdout, stderr) => {
-		  if (err) {
-		  	new Log(self, "Build and Deploy", "Node could not execute the command", err);
-		    return;
-		  }
-		  new Log(self, "Build and Deploy", "Command executed without error", stdout, stderr);
-		});*/
+		commands = commands.split("&&");
+		for(let i = 0; i < commands.length; i++) {
+			let c = commands[i];
+			c = c.trim().split(" ");
+			console.log("Command: ", c);
+			await util.spawn(self, "Deploy", c[0], c.slice(1), spawnOpt);
+		}
 	}
 
 	toJSON() {

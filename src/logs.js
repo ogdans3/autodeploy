@@ -6,6 +6,7 @@ class Log {
 		this.logName = logName;
 		this.text = text;
 		logs.push(this);
+		console.log(this.toJSON());
 	}
 
 	toJSON() {
