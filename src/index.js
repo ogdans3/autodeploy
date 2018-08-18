@@ -12,10 +12,12 @@ const bcrypt   = require('bcrypt-nodejs');
 const fs = require("fs");
 const path = require("path");
 
+require("./db.js").init();
 const sshKeyGen = require("./sshKeyGen.js");
 const git = require("./git.js");
 const util = require("./util.js");
 const logs = require("./logs.js");
+
 sshKeyGen.generate();
 
 let port = 3000;
@@ -37,13 +39,13 @@ app.use(passport.session()); // persistent login sessions
 let latestMessage = "No message received yet";
 
 let Repository = require("./repository.js");
-let repositories = {};
-
 
 app.get("/login", (req, res) => {
 	res.render("login.dot");
 })
 app.get("/signup", (req, res) => {
+	let keyObj = util.generateSignUpKey();
+	console.log("Signup Key: ", keyObj.key, "\tvalid for " + keyObj.duration + " seconds");
 	res.render("signup.dot");
 })
 app.get("/logout", (req, res) => {
@@ -59,7 +61,7 @@ app.post('/signup', passport.authenticate('local-signup', {
     failureRedirect : '/signup', // redirect back to the signup page if there is an error
 }));
 app.post('/login', passport.authenticate('local-login', {
-    successRedirect : '/logs', // redirect to the secure profile section
+    successRedirect : '/', // redirect to the secure profile section
     failureRedirect : '/login', // redirect back to the signup page if there is an error
 }));
 
@@ -72,28 +74,35 @@ let isLoggedIn = (req, res, next) => {
 
 
 
-
-
-
 app.get("/new", isLoggedIn, (req, res) => {
 	res.sendFile(path.join(__dirname, "frontend", "new.html"));
 })
 
 app.get("/list", isLoggedIn, (req, res) => {
-	let repos = Object.keys(repositories).map(r => repositories[r].toJSON())
-	res.render("list.dot", {repositories: repos});
+	Repository.list()
+		.then(repositories => {
+			let repos = repositories.map(r => r.toJSON());
+			res.render("list.dot", {repositories: repos});
+		})
+		.catch(err => {
+			console.error("Unable to list repositories", err);
+		})
 })
 
 app.get("/repo/edit/:id", isLoggedIn, (req, res) => {
 	let id = req.params.id;
-	let repo = repositories[id].toJSON();
-	console.log(repo);
-	res.render("edit.dot", {repository: repo});
+	Repository.findById(id)
+		.then((repo) => {
+			res.render("edit.dot", {repository: repo.toJSON()});
+		})
+		.catch((err) => {
+			new Log(null, "Unable to find repository with id: " + id);
+			res.redirect("/list");
+		})
 })
 
 app.post("/new", isLoggedIn, (req, res) => {
 	let json = req.body;
-	console.log(json)
 
 	let name = json.name;
 	let url = json.url;
@@ -101,9 +110,13 @@ app.post("/new", isLoggedIn, (req, res) => {
 	let deployCommands = json.deployCommands;
 	let teardownCommands = json.teardownCommands;
 	repo = new Repository(name, url, directory, deployCommands, teardownCommands);
-	repositories[repo.getIdentifier()] = repo;
-
-	res.send("Registered: " + name + ", " + url + ", " + directory);
+	repo.save()
+		.then(() => {
+			new logs.Log(repo, "Repository created", "Repository was created on the server.", "The repository will be downloaded and relevant information will be extracted after the first merge with master.");
+		}).catch((err) => {
+			new logs.Log(null, "Unable to save repository", err);
+		});
+	res.redirect("/");
 })
 
 app.post("/save/:id", isLoggedIn, (req, res) => {
@@ -116,48 +129,49 @@ app.post("/save/:id", isLoggedIn, (req, res) => {
 	let deployCommands = json.deployCommands;
 	let teardownCommands = json.teardownCommands;
 
-	let repo = repositories[id];
-	repo.update(name, url, directory, deployCommands, teardownCommands);
-	res.send("Saved");
+	Repository.findById(id)
+		.then((repo) => {
+			repo.update(name, url, directory, deployCommands, teardownCommands);
+			res.send("Saved");
+		})
+		.catch((err) => {
+			new Log(null, "Unable to find repository with id: " + id);
+			res.redirect("/list");
+		})
 })
 
-app.post("/receive", isLoggedIn, function(req, res){
+app.post("/receive", function(req, res){
 	let json = req.body;
-	console.log(req.body);      // your JSON
 	res.send();
 
 	let url = json.repository.url;
 	url = Repository.handleGitUrl(url);
-	let repo;
-	for(var i = 0; i < Object.keys(repositories).length; i++) {
-		let key = Object.keys(repositories)[i];
-		let r = repositories[key];
-		if(r.userDefined.url === url) {
-			repo = r;
-		}
-	}
+	Repository.findOne({url: url})
+		.then((repo) => {
+			if(repo === null || repo === undefined) {
+				console.warn("Warning: Repository has not been created. We are ignoring the webhook intill a user creates the repository at the /new endpoint.")
+				return;
+			}else {
+				console.log("Webhook for " + repo.displayName + " received");
+			}
 
-	if(repo === null || repo === undefined) {
-		console.warn("Warning: Repository has not been created. We are ignoring the webhook intill a user creates the repository at the /new endpoint.")
-		return;
-	}else {
-		console.log("Webhook for " + repo.displayName + " received");
-	}
+			if(!repo.isExtracted) {
+				repo.extract(json);
+				repo.saveUpdate();
+			}
 
-	if(!repo.isExtracted) {
-		repo.extract(json);
-	}
-
-	console.log(repo, repo.userDefined, repo.directory);
-
-	let pusher = json.pusher;
-	console.log("Pusher: ", pusher);
-	//TODO: Add proper casting to webhook classes! and use instanceof
-	//If there exists a pusher object in the json, we assume that it is a pull request
-	if(pusher !== null && pusher !== undefined) {
-		//TODO: Get the repository based on the information given in the json
-		repositoryUpdate(repo);
-	}
+			let pusher = json.pusher;
+			//TODO: Add proper casting to webhook classes! and use instanceof
+			//If there exists a pusher object in the json, we assume that it is a pull request
+			if(pusher !== null && pusher !== undefined) {
+				//TODO: Get the repository based on the information given in the json
+				repositoryUpdate(repo);
+			}
+		})
+		.catch((err) => {
+			console.error("Error happened: ", err);
+			res.redirect("/list");
+		})
 });
 
 function repositoryUpdate(repo) {
@@ -171,9 +185,15 @@ function repositoryUpdate(repo) {
 }
 
 app.get("/logs", isLoggedIn, function(req, res) {
-	let jsonLogs = logs.logs.map(log => log.toJSON());
-	console.log(jsonLogs);
-	res.render("log.dot", {logs: jsonLogs.reverse()});
+	logs.getLogs()
+		.then((logs) => {
+			res.render("log.dot", {logs: logs});
+		})
+		.catch((err) => {
+			let logReports = [];
+			logReports.push(new logs.Log(null, "Unable to get logs", err).toJSON());
+			res.render("log.dot", {logs: logReports});
+		})
 })
 
 app.get("/key/:name", isLoggedIn, function(req, res) {
@@ -184,7 +204,6 @@ app.get("/key/:name", isLoggedIn, function(req, res) {
 	}
 	let file = path.join(sshKeyGen.FOLDER, name);
 	file = file.replace(/\\/g, "/");
-	console.log(file)
 	fs.readFile(file, "utf8", function(err, contents) {
 		if(err) {
 			res.status(400).send("Bad Request. Not able to read file");
@@ -194,12 +213,10 @@ app.get("/key/:name", isLoggedIn, function(req, res) {
 })
 
 app.get("/key", isLoggedIn, function(req, res) {
-	console.log("Get all keys");
 	fs.readdir(sshKeyGen.FOLDER, (err, files) => {
 		if(err) {
 			console.log("Err: ", err)
 		}
-		console.log("Keys: ", files);
 		res.send(files);
 	})
 })

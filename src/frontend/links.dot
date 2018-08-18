@@ -5,8 +5,10 @@
 </head>
 
 <body>
-	<a href = "/new">Create new repository</a> 
-	<br>
-	<a href = "/logs">View logs</a>
+	<a href = "/signup">Sign up</a> <br>
+	<a href = "/login">Login</a> <br>
+	<a href = "/list">View repositories</a> <br>
+	<a href = "/new">Create new repository</a> <br>
+	<a href = "/logs">View logs</a> <br>
 </body>
 </html>

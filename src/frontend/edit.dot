@@ -5,7 +5,6 @@
 			<label for = "name">Name:</label><input name = "name" type = "text" value = "[[= model.repository.displayName]]">
 			<label for = "url">URL:</label><input name = "url" type = "text" value = "[[= model.repository.url]]">
 			<label for = "directory">Directory:</label><input name = "directory" value = "[[= model.repository.directory]]" type = "text">
-			<label for = "commands">Commands:</label><input name = "commands" value = "[[= model.repository.commands]]" type = "text">
 			<label for = "deployCommands">Deploy commands:</label><input name = "deployCommands" value = "[[= model.repository.commands.deploy]]" type = "text">
 			<label for = "teardownCommands">Teardown commands:</label><input name = "teardownCommands" value = "[[= model.repository.commands.teardown]]" type = "text">
 

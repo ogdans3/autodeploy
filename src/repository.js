@@ -4,11 +4,13 @@ const uuidv4 = require('uuid/v4');
 const { exec, spawn } = require('child_process');
 const kill = require('tree-kill');
 
-
 const Log = require("./logs.js").Log;
+const LogElement = require("./models/LogElement.js");
+const db = require("./db.js").dbs.repositories;
 
-class Repository {
+class Repository extends LogElement {
 	constructor(name, url, localDirectory, deployCommands, teardownCommands) {
+		super();
 		console.log(name, url, localDirectory)
 
 		if(localDirectory === null || localDirectory === undefined || localDirectory === "") {
@@ -30,7 +32,6 @@ class Repository {
 
 		this._isExtracted = false;
 		this.pid = null;
-		new Log(this, "Repository created", "Repository was created on the server.", "The repository will be downloaded and relevant information will be extracted after the first merge with master.");
 	}
 	
 	extract(json) {
@@ -46,24 +47,6 @@ class Repository {
 		this._isExtracted = true;
 	}
 
-	/*
-	This function returns a identifier for the repository which can be inserted in a hashmap. It may be constructred from any information given by the git webhooks
-	The identifier is guaranteed to be unique across all supported services
-	*/
-	static getIdentifier(json) {
-		let repo = json.repository;
-		return repo.url;
-	}
-
-	static handleGitUrl(url) {
-		if(url.indexOf(".git") !== url.length - ".git".length) {
-			url += ".git";
-		}
-		if(url.indexOf("https") !== 0) {
-			url = url.replace("http://", "https://");
-		}
-		return url;
-	}
 
 	get directory() {
 		return this.userDefined.localDirectory;
@@ -81,6 +64,15 @@ class Repository {
 		return this.id;
 	}
 
+	set(key, value) {
+		let oldValue = this[key];
+		if(oldValue !== undefined) {
+			this[key] = value;
+			//Reflect the change in the database
+			this.saveUpdate();
+		}
+	}
+
 	update(name, url, directory, deployCommands, teardownCommands) {
 		this.userDefined.name = name;
 		this.userDefined.url = url;
@@ -91,6 +83,19 @@ class Repository {
 			//TODO: Should we clone the repo again and delete the old one?
 		}
 		this.commands = {deploy: deployCommands, teardown: teardownCommands};
+	}
+
+	save() {
+		let self = this;
+		return new Promise((fulfill, reject) => {
+			db.insert(self.toJSON(), function (err, newDoc) {
+				if(err) {
+					reject();
+					return;
+				}
+				fulfill();
+			});
+		})
 	}
 
 	//TODO: Add event system
@@ -119,9 +124,15 @@ class Repository {
 				}
 				kill(self.pid, "SIGKILL", (err) => {
 					if(err) {
-						new Log(self, "Teardown", "Failed to terminate service", err);
-						reject();
-						return;
+						//Error code 128 means the process id does not exist any more and the process is therefore terminated
+						if(err.code === 128) {
+							new Log(self, "Teardown", "Service PID does not exist anymore, service is assumed shut down");
+							fulfill();
+						}else {
+							new Log(self, "Teardown", "Failed to terminate service", err);
+							reject();
+							return;
+						}
 					}
 					new Log(self, "Teardown", "Service terminated");
 					fulfill();
@@ -183,7 +194,115 @@ class Repository {
 		obj.directory = this.directory;
 		obj.editUrl = "/repo/edit/" + this.getIdentifier();
 		obj.commands = this.commands;
+		obj.fullJson = this.fullJson;
+		obj.pid = this.pid;
 		return obj;
+	}
+
+	saveUpdate() {
+		let self = this;
+		return new Promise((fulfill, reject) => {
+			db.update({id: self.id}, self.toJSON(), function(err, numReplaced) {
+				if(err) {
+					new Log(self, "Unable to update repository in database", err);
+					reject();
+					return;
+				}
+				fulfill();
+			})
+		})
+	}
+
+	static fromJSON(json) {
+		let displayName = json.displayName;
+		let url = json.url;
+		let localDirectory = json.directory;
+		let deployCommands = json.commands.deploy || "";
+		let teardownCommands = json.commands.teardown || "";
+		let repo = new Repository(displayName, url, localDirectory, deployCommands, teardownCommands);
+		repo.id = json.id;
+		repo.pid = json.pid;
+		if(json.isExtracted) {
+			repo.extract(json.fullJson);
+		}
+		return repo;
+	}
+
+	/*
+	This function returns a identifier for the repository which can be inserted in a hashmap. It may be constructred from any information given by the git webhooks
+	The identifier is guaranteed to be unique across all supported services
+	*/
+	static getIdentifier(json) {
+		let repo = json.repository;
+		return repo.url;
+	}
+
+	static handleGitUrl(url) {
+		if(url.indexOf(".git") !== url.length - ".git".length) {
+			url += ".git";
+		}
+		if(url.indexOf("https") !== 0) {
+			url = url.replace("http://", "https://");
+		}
+		return url;
+	}
+
+	static findById(id) {
+		return new Promise((fulfill, reject) => {
+			db.findOne({"id": id}, function (err, doc) {
+				console.log(err, doc);
+				if(err) {
+					reject(err);
+					return;
+				}
+				if(doc) {
+					fulfill(Repository.fromJSON(doc));
+				}else {
+					fulfill();
+				}
+			});
+		})
+	}
+
+	static findOne(obj) {
+		return new Promise((fulfill, reject) => {
+			db.findOne(obj, function (err, doc) {
+				if(err) {
+					reject(err);
+					return;
+				}
+				if(doc) {
+					fulfill(Repository.fromJSON(doc));
+				}else {
+					fulfill();
+				}
+			});
+		})
+	}
+
+	static list(obj, skip, limit) {
+		skip = skip || 0;
+		//TODO: No limit?
+		limit = limit || 100;
+
+		return new Promise((fulfill, reject) => {
+			db.find()
+				.sort({name: 1})
+				.skip(skip)
+				.limit(limit)
+				.exec(function (err, docs) {
+					if(err) {
+						reject(err);
+						return;
+					}
+					if(docs.length !== 0) {
+						let repos = docs.map(doc => Repository.fromJSON(doc));
+						fulfill(repos);
+					}else {
+						fulfill([]);
+					}
+				});
+		})
 	}
 }
 
