@@ -1,13 +1,20 @@
 const express = require("express");
 const app = express();
-const bodyParser = require("body-parser");
 const dot = require("express-dot-engine");
+
+const cookieParser = require('cookie-parser');
+const bodyParser = require("body-parser");
+const session      = require('express-session');
+const passport = require('passport');
+const bcrypt   = require('bcrypt-nodejs');
+
 
 const fs = require("fs");
 const path = require("path");
 
 const sshKeyGen = require("./sshKeyGen.js");
 const git = require("./git.js");
+const util = require("./util.js");
 const logs = require("./logs.js");
 sshKeyGen.generate();
 
@@ -18,10 +25,14 @@ app.set("views", path.join(__dirname, "frontend"));
 app.set("view engine", "dot");
 app.engine('.dot', dot.__express);
 
+app.use(cookieParser()); // read cookies (needed for auth)
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({
-  extended: true
+	extended: true
 }));
+app.use(session({ secret: util.getSecret() })); // session secret
+app.use(passport.initialize());
+app.use(passport.session()); // persistent login sessions
 
 let latestMessage = "No message received yet";
 
@@ -29,23 +40,58 @@ let Repository = require("./repository.js");
 let repositories = {};
 
 
-app.get("/new", (req, res) => {
+app.get("/login", (req, res) => {
+	res.render("login.dot");
+})
+app.get("/signup", (req, res) => {
+	res.render("signup.dot");
+})
+app.get("/logout", (req, res) => {
+	req.logout();
+	res.redirect("/");
+})
+
+require("./signup.js")(passport);
+require("./login.js")(passport);
+// process the signup form
+app.post('/signup', passport.authenticate('local-signup', {
+    successRedirect : '/', // redirect to the secure profile section
+    failureRedirect : '/signup', // redirect back to the signup page if there is an error
+}));
+app.post('/login', passport.authenticate('local-login', {
+    successRedirect : '/logs', // redirect to the secure profile section
+    failureRedirect : '/login', // redirect back to the signup page if there is an error
+}));
+
+let isLoggedIn = (req, res, next) => {
+	if(req.isAuthenticated())
+		return next();
+	res.redirect("/");
+}
+
+
+
+
+
+
+
+app.get("/new", isLoggedIn, (req, res) => {
 	res.sendFile(path.join(__dirname, "frontend", "new.html"));
 })
 
-app.get("/list", (req, res) => {
+app.get("/list", isLoggedIn, (req, res) => {
 	let repos = Object.keys(repositories).map(r => repositories[r].toJSON())
 	res.render("list.dot", {repositories: repos});
 })
 
-app.get("/repo/edit/:id", (req, res) => {
+app.get("/repo/edit/:id", isLoggedIn, (req, res) => {
 	let id = req.params.id;
 	let repo = repositories[id].toJSON();
 	console.log(repo);
 	res.render("edit.dot", {repository: repo});
 })
 
-app.post("/new", (req, res) => {
+app.post("/new", isLoggedIn, (req, res) => {
 	let json = req.body;
 	console.log(json)
 
@@ -60,7 +106,7 @@ app.post("/new", (req, res) => {
 	res.send("Registered: " + name + ", " + url + ", " + directory);
 })
 
-app.post("/save/:id", (req, res) => {
+app.post("/save/:id", isLoggedIn, (req, res) => {
 	let id = req.params.id;
 	let json = req.body;
 
@@ -75,7 +121,7 @@ app.post("/save/:id", (req, res) => {
 	res.send("Saved");
 })
 
-app.post("/receive", function(req, res){
+app.post("/receive", isLoggedIn, function(req, res){
 	let json = req.body;
 	console.log(req.body);      // your JSON
 	res.send();
@@ -124,13 +170,13 @@ function repositoryUpdate(repo) {
 	}
 }
 
-app.get("/logs", function(req, res) {
+app.get("/logs", isLoggedIn, function(req, res) {
 	let jsonLogs = logs.logs.map(log => log.toJSON());
 	console.log(jsonLogs);
 	res.render("log.dot", {logs: jsonLogs.reverse()});
 })
 
-app.get("/key/:name", function(req, res) {
+app.get("/key/:name", isLoggedIn, function(req, res) {
 	let name = req.params.name;
 	//TODO: Fix cases such as "key_1.pub.pub"
 	if(name.indexOf(".pub") != name.length - ".pub".length) {
@@ -147,7 +193,7 @@ app.get("/key/:name", function(req, res) {
 	});
 })
 
-app.get("/key", function(req, res) {
+app.get("/key", isLoggedIn, function(req, res) {
 	console.log("Get all keys");
 	fs.readdir(sshKeyGen.FOLDER, (err, files) => {
 		if(err) {

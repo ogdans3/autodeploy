@@ -8,6 +8,10 @@ module.exports.makeDir = (dir) => {
 	}
 }
 
+module.exports.getSecret = () => {
+	return "test";
+}
+
 module.exports.spawn = (repo, logName, command, args, options) => {
 	return new Promise((fulfill, reject) => {
 		console.log("SPAWN PROCESS");
